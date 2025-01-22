@@ -1,0 +1,82 @@
+---
+- name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
+  hosts: localhost
+  gather_facts: no
+  vars:
+    jenkins_url: "http://192.168.150.10:8080"
+    job_name: "Codel1.0.0- Deploy NIC Proxmox Env"
+    api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+    jenkins_user: "amal"
+    jenkins_api_token: "11e6cdba6083554658c8463aaecbe80e10"
+    proxmox_host: "185.246.85.24"
+    proxmox_node: "frhb89946ds"
+
+  tasks:
+    - name: Obtenir le statut du log du job Jenkins
+      uri:
+        url: "{{ api_endpoint }}"
+        method: GET
+        return_content: yes
+        status_code: 200
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_api_token }}"
+        force_basic_auth: yes
+      register: jenkins_response
+
+    - name: Vérifier si le job a réussi
+      set_fact:
+        job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
+
+    - name: Afficher le statut du job
+      debug:
+        msg: "Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}."
+
+    - name: Gérer les erreurs spécifiques
+      when: not job_success
+      block:
+        - name: Vérifier l'erreur 'interface already exists'
+          set_fact:
+            interface_error: "{{ 'interface already exists' in jenkins_response.content }}"
+
+        - name: Afficher l'erreur spécifique
+          debug:
+            msg: "Le job a échoué car des interfaces existent déjà sur le serveur Proxmox de destination."
+          when: interface_error
+
+        - name: Mettre à jour les interfaces existantes sur Proxmox
+          when: interface_error
+          community.general.proxmox_nic:
+            api_host: "{{ proxmox_host }}"
+            api_user: "root@pam"
+            api_password: "votre_mot_de_passe_proxmox"
+            vmid: "{{ item.vmid }}"
+            interface: "{{ item.iface }}"
+            bridge: "{{ item.bridge_ports }}"
+            model: "virtio"
+            firewall: "{{ item.firewall | default(false) }}"
+            link_down: "{{ not item.active }}"
+            state: present
+          loop:
+            - { vmid: 100, iface: "vmbr2", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr3", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr4", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr1", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr5", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr7", bridge_ports: "", active: 1 }
+
+        - name: Appliquer les changements réseau sur Proxmox
+          command: ifreload -a
+          become: yes
+          when: interface_error
+
+        - name: Suggérer les prochaines étapes
+          debug:
+            msg: >
+              Les interfaces existantes ont été mises à jour.
+              Vérifiez la configuration réseau sur le serveur Proxmox et relancez le job Jenkins si nécessaire.
+          when: interface_error
+
+    - name: Afficher un message de succès
+      debug:
+        msg: "Le job Jenkins a réussi et aucune action supplémentaire n'est nécessaire."
+      when: job_success
