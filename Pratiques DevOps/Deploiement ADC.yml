@@ -1,0 +1,98 @@
+---
+- name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
+  hosts: localhost
+  gather_facts: no
+  vars:
+    # Token Vault
+    #: "hvs.hC3ZmWzkBFC4EsxhqjqTlZdh"  # Utilisez votre token ici
+    vault_url: "http://10.10.150.2:8200"  # URL de votre instance Vault
+
+    # Récupération des secrets depuis Vault avec le token et l'URL spécifié
+    ansible_become_value: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret/all_vars ansible_become=value', url=vault_url, token=vault_token) | bool }}"
+
+    # Variables Jenkins extraites des secrets
+    jenkins_url: "http://192.168.150.10:8080"  # URL de base Jenkins
+    job_name: "CODEL%201.0.0%20-%20Deploy%20ADC"  # Job Jenkins spécifique
+    jenkins_api_token: "11e6cdba6083554658c8463aaecbe80e10"  # Token Jenkins
+    jenkins_user: "amal"  # Nom d'utilisateur Jenkins
+
+    # Définir l'URL de l'API Jenkins pour le job spécifique
+    api_endpoint: "{{ jenkins_url }}/job/{{ job_name }}/lastBuild/consoleText/api/json"
+
+  tasks:
+    # Vérifier que l'URL de l'API Jenkins est bien définie
+    - name: Vérifier que l'URL de l'API Jenkins est bien définie
+      assert:
+        that:
+          - api_endpoint is defined
+        fail_msg: "L'URL de l'API Jenkins n'est pas définie correctement. Vérifiez la variable api_endpoint."
+
+    # Obtenir le statut du log du job Jenkins
+    - name: Obtenir le statut du log du job Jenkins
+      uri:
+        url: "{{ api_endpoint }}"
+        method: GET
+        return_content: yes
+        status_code: 200
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_api_token }}"
+        force_basic_auth: yes
+      register: jenkins_response
+
+    # Vérifier si le job a réussi
+    - name: Vérifier si le job a réussi
+      set_fact:
+        job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
+
+    # Afficher le statut du job
+    - name: Afficher le statut du job
+      debug:
+        msg: "Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}."
+
+    # Gérer les erreurs spécifiques
+    - name: Gérer les erreurs spécifiques
+      when: not job_success
+      block:
+        - name: Vérifier l'erreur 'interface already exists'
+          set_fact:
+            interface_error: "{{ 'interface already exists' in jenkins_response.content }}"
+
+        - name: Afficher l'erreur spécifique
+          debug:
+            msg: "Le job a échoué car des interfaces existent déjà sur le serveur Proxmox de destination."
+          when: interface_error
+
+        - name: Mettre à jour les interfaces existantes sur Proxmox
+          when: interface_error
+          community.general.proxmox_nic:
+            api_host: "{{ proxmox_host }}"
+            api_user: "root@pam"
+            api_password: "{{ lookup('env', 'PROXMOX_PASSWORD') }}"
+            vmid: "{{ item.vmid }}"
+            interface: "{{ item.iface }}"
+            bridge: "{{ item.bridge_ports }}"
+            model: "virtio"
+            firewall: "{{ item.firewall | default(false) }}"
+            link_down: "{{ not item.active }}"
+            state: present
+          loop:
+            - { vmid: 100, iface: "vmbr2", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr3", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr4", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr1", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr5", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr7", bridge_ports: "", active: 1 }
+
+        - name: Appliquer les changements réseau sur Proxmox
+          command: ifreload -a
+          become: yes
+          when: interface_error
+
+        - name: Suggérer les prochaines étapes
+          debug:
+            msg: >
+              Les interfaces existantes ont été mises à jour.
+              Vérifiez la configuration réseau sur le serveur Proxmox et relancez le job Jenkins si nécessaire.
+          when: interface_error
+
+    - name: Afficher un message de succès

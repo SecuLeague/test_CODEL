@@ -1,0 +1,74 @@
+- name: Tester et configurer Vault sur le serveur distant
+  hosts: vault_server
+  gather_facts: no
+  become: yes
+  collections:
+    - community.hashi_vault
+
+  vars:
+    vault_addr: "http://127.0.0.1:8200"
+    vault_token: "hvs.CAESIIlBIvTzU-dFLOzwuRPpeMmP9uQOI71y9TFKDeav1v-vGh4KHGh2cy5ucU1pTkd2N0J1SzZNUHJiTmprUkxYcVQ"
+    proxmox_source_environment: "dev"
+    proxmox_destination_environment: "qua"
+    ssh_host: "192.168.150.10"
+
+  tasks:
+    - name: Vérifier si Vault est actif localement
+      shell: systemctl is-active vault
+      register: vault_status
+      failed_when: vault_status.stdout.strip() != "active"
+
+    - name: Afficher l'état du service Vault localement
+      debug:
+        msg: "Le service Vault est {{ vault_status.stdout.strip() }}"
+
+    - name: Vérifier la connectivité SSH avant de continuer
+      ansible.builtin.ping:
+      delegate_to: localhost
+
+    - name: Tester la connexion SSH au serveur Vault via SSH agent
+      ansible.builtin.shell: |
+        echo "Connexion SSH au serveur Vault..."
+        ssh -o StrictHostKeyChecking=no root@{{ ssh_host }} "systemctl status vault && vault status"
+      register: ssh_vault_status
+      delegate_to: localhost  # Exécute cette commande localement
+      failed_when:
+        - "'Permission denied' in ssh_vault_status.stderr"
+        - ssh_vault_status.rc != 0
+
+    - name: Afficher le résultat de la connexion SSH
+      debug:
+        var: ssh_vault_status
+
+    - name: Vérifier la récupération des secrets Proxmox (environnement source)
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/{{ proxmox_source_environment }}"  # Adaptez 'data' selon KV v2 ou KV v1
+      register: source_vault_secrets
+
+    - name: Vérifier la récupération des secrets (source)
+      fail:
+        msg: "Impossible de récupérer les secrets pour l'environnement source."
+      when: source_vault_secrets.failed is defined and source_vault_secrets.failed
+
+    - name: Afficher les secrets pour l'environnement source
+      debug:
+        var: source_vault_secrets
+
+    - name: Récupérer les secrets Proxmox (environnement destination)
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/{{ proxmox_destination_environment }}"  # Adaptez 'data' selon KV v2 ou KV v1
+      register: destination_vault_secrets
+
+    - name: Vérifier la récupération des secrets (destination)
+      fail:
+        msg: "Impossible de récupérer les secrets pour l'environnement destination."
+      when: destination_vault_secrets.failed is defined and destination_vault_secrets.failed
+
+    - name: Afficher les secrets pour l'environnement destination
+      debug:
+        var: destination_vault_secrets
+

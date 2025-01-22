@@ -1,0 +1,47 @@
+---
+- name: Vérifier l'installation de Zabbix
+  hosts: localhost
+  gather_facts: no
+  become: yes
+  vars:
+    # Utilisation d'un lookup avec un chemin plus direct
+    ansible_ssh_common_args: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
+    ansible_become_password: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
+    ansible_ssh_pass: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
+
+  tasks:
+    # Debug : Afficher les valeurs récupérées depuis Vault
+    - name: Debug - Afficher ansible_ssh_common_args
+      debug:
+        msg: "{{ ansible_ssh_common_args }}"
+
+    - name: Debug - Afficher ansible_become_password
+      debug:
+        msg: "{{ ansible_become_password }}"
+
+    - name: Debug - Afficher ansible_ssh_pass
+      debug:
+        msg: "{{ ansible_ssh_pass }}"
+
+    # Vérifier si le package Zabbix est installé
+    - name: Vérifier si le package Zabbix est installé
+      ansible.builtin.command: rpm -q zabbix-agent
+      register: zabbix_installed
+      changed_when: false
+      failed_when: false
+
+    # Vérifier si le service Zabbix est en cours d'exécution
+    - name: Vérifier si le service Zabbix est en cours d'exécution
+      ansible.builtin.systemd:
+        name: zabbix-agent
+        state: started
+      check_mode: yes
+      register: zabbix_service
+      failed_when: false
+
+    # Afficher les résultats
+    - name: Afficher le résultat
+      ansible.builtin.debug:
+        msg:
+          - "Zabbix est installé: {{ zabbix_installed.rc == 0 }}"
+          - "Le service Zabbix est en cours d'exécution: {{ zabbix_service.changed == false }}"

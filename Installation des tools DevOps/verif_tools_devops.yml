@@ -1,0 +1,92 @@
+---
+- name: Vérification de l'installation et des versions des outils
+  hosts: localhost
+  gather_facts: no
+  become: yes
+  vars:
+    # Utilisation d'un lookup pour récupérer les secrets de Vault
+    vault_secret: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/vm_outils/ip', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
+
+  tasks:
+    # Debug des données Vault pour examiner la structure complète de la réponse
+    - name: Debug des données Vault
+      debug:
+        msg: "Contenu de vault_secret : {{ vault_secret }}"
+
+    # Définir la variable vm_ip avec l'IP récupérée de Vault (à ajuster après le debug)
+    - name: Définir la variable vm_ip avec l'IP récupérée de Vault
+      set_fact:
+        vm_ip: "{{ vault_secret.value }}"  # Remplacez par vault_secret.data.value si nécessaire
+
+    # Affichage de l'IP de la VM
+    - name: Afficher l'IP de la VM
+      debug:
+        msg: "L'IP de la VM est : {{ vm_ip }}"
+
+    # Vérification de Git sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation et la version de Git sur la VM cible
+      command: git --version
+      delegate_to: "{{ vm_ip }}"
+      register: git_check
+      ignore_errors: yes
+
+    # Vérification de Java sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation et la version de Java sur la VM cible
+      command: java -version
+      delegate_to: "{{ vm_ip }}"
+      register: java_check
+      ignore_errors: yes
+
+    # Vérification de Jenkins sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation de Jenkins sur la VM cible
+      command: systemctl is-active jenkins
+      delegate_to: "{{ vm_ip }}"
+      register: jenkins_check
+      ignore_errors: yes
+      failed_when: jenkins_check.rc not in [0, 3]  # Si Jenkins est inactif, ce n'est pas une erreur.
+
+    # Vérification de Terraform sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation et la version de Terraform sur la VM cible
+      command: terraform -v
+      delegate_to: "{{ vm_ip }}"
+      register: terraform_check
+      ignore_errors: yes
+      failed_when: terraform_check.rc != 0  # Si Terraform n'est pas installé, c'est une erreur.
+      changed_when: false
+
+    # Ajouter un message d'erreur spécifique si Terraform n'est pas installé
+    - name: Message en cas de Terraform non installé
+      debug:
+        msg: "Terraform n'est pas installé ou n'est pas disponible dans le PATH."
+      when: terraform_check.rc != 0
+
+    # Vérification de Python sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation et la version de Python sur la VM cible
+      command: python3 --version
+      delegate_to: "{{ vm_ip }}"
+      register: python_check
+      ignore_errors: yes
+
+    # Vérification d'Ansible sur la machine cible (VM récupérée depuis Vault)
+    - name: Vérifier l'installation et la version d'Ansible sur la VM cible
+      command: ansible --version
+      delegate_to: "{{ vm_ip }}"
+      register: ansible_check
+      ignore_errors: yes
+
+    # Affichage des résultats
+    - name: Afficher les résultats
+      debug:
+        msg:
+          - "Git installé: {{ git_check.rc == 0 }}"
+          - "Version Git: {{ git_check.stdout if git_check.rc == 0 else 'Non installé' }}"
+          - "Java installé: {{ java_check.rc == 0 }}"
+          - "Version Java: {{ java_check.stderr if java_check.rc == 0 else 'Non installé' }}"
+          - "Jenkins installé: {{ jenkins_check.rc == 0 }}"
+          - "Statut Jenkins: {{ jenkins_check.stdout if jenkins_check.rc == 0 else 'Non installé ou inactif' }}"
+          - "Terraform installé: {{ terraform_check.rc == 0 }}"
+          - "Version Terraform: {{ terraform_check.stdout_lines[0] if terraform_check.rc == 0 else 'Non installé' }}"
+          - "Python installé: {{ python_check.rc == 0 }}"
+          - "Version Python: {{ python_check.stdout if python_check.rc == 0 else 'Non installé' }}"
+          - "Ansible installé: {{ ansible_check.rc == 0 }}"
+          - "Version Ansible: {{ ansible_check.stdout_lines[0] if ansible_check.rc == 0 else 'Non installé' }}"

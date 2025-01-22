@@ -1,0 +1,138 @@
+---
+- name: Collect network information from the source Proxmox server and configure destination
+  hosts: localhost
+  gather_facts: yes
+
+  vars:
+    vault_addr: "{{ lookup('env', 'VAULT_ADDR') | default('http://127.0.0.1:8200', true) }}"
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+    proxmox_environment: "{{ lookup('env', 'ENV_Proxmox') | default('dev', true) }}"
+
+  tasks:
+    - name: Ensure Vault is accessible
+      uri:
+        url: "{{ vault_addr }}/v1/sys/health"
+        method: GET
+        status_code: 200
+      register: vault_health
+      ignore_errors: yes
+
+    - name: Retrieve Proxmox source secrets from Vault
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/{{ proxmox_environment }}"
+      register: source_vault_secrets
+      ignore_errors: yes
+      failed_when: false
+
+    - name: Debug - Inspect the source Vault secrets
+      debug:
+        var: source_vault_secrets
+
+    - name: Check if Vault secrets were retrieved successfully
+      debug:
+        msg: "Échec de la récupération des secrets Vault. Vérifiez les permissions du token et l'accessibilité du serveur Vault."
+      when: source_vault_secrets.failed | default(false)
+
+    - name: Retrieve Proxmox destination secrets from Vault
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/qua"
+      register: destination_vault_secrets
+      ignore_errors: yes
+      failed_when: false
+
+    - name: Debug - Inspect the destination Vault secrets
+      debug:
+        var: destination_vault_secrets
+
+    - name: Log in to Proxmox API and get authentication ticket for source Proxmox
+      uri:
+        url: "https://{{ source_vault_secrets.data.data.ip }}:8006/api2/json/access/ticket"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ source_vault_secrets.data.data.user }}"
+          password: "{{ source_vault_secrets.data.data.password }}"
+        status_code: 200
+        validate_certs: no
+      register: login_response_proxmox_source
+      when: source_vault_secrets.data is defined
+      ignore_errors: yes
+
+    - name: Get network information from source Proxmox
+      uri:
+        url: "https://{{ source_vault_secrets.data.data.ip }}:8006/api2/json/nodes/{{ source_vault_secrets.data.data.node }}/network"
+        method: GET
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_source.json.data.ticket }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_source.json.data.CSRFPreventionToken }}"
+        status_code: 200
+        validate_certs: no
+      register: proxmox_source_network_info
+      when: login_response_proxmox_source.json is defined
+      ignore_errors: yes
+
+    - name: Filter network information
+      set_fact:
+        filtered_network_info: "{{ proxmox_source_network_info.json.data | selectattr('iface', 'match', '^vmbr[1-9]+$') | list }}"
+      when: proxmox_source_network_info.json is defined
+
+    - name: Log in to Proxmox API and get authentication ticket for destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip }}:8006/api2/json/access/ticket"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ destination_vault_secrets.data.data.user }}"
+          password: "{{ destination_vault_secrets.data.data.password }}"
+        status_code: 200
+        validate_certs: no
+      register: login_response_proxmox_destination
+      when: destination_vault_secrets.data is defined
+      ignore_errors: yes
+
+    - name: Create or update vmbr interfaces on destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip }}:8006/api2/json/nodes/{{ destination_vault_secrets.data.data.node }}/network"
+        method: POST
+        body_format: json
+        body:
+          type: bridge
+          iface: "{{ item.iface }}"
+          comments: "{{ item.comments | default('') }}"
+          autostart: "{{ item.autostart }}"
+          bridge_ports: "{{ item.bridge_ports | default('') }}"
+          bridge_stp: "{{ item.bridge_stp | default('off') }}"
+          bridge_fd: "{{ item.bridge_fd | default('0') }}"
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_destination.json.data.ticket }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_destination.json.data.CSRFPreventionToken }}"
+        status_code: [200, 400]
+        validate_certs: no
+      loop: "{{ filtered_network_info }}"
+      register: create_interface_results
+      failed_when: false
+      ignore_errors: yes
+
+    - name: Apply network changes on destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip }}:8006/api2/json/nodes/{{ destination_vault_secrets.data.data.node }}/network"
+        method: PUT
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_destination.json.data.ticket }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_destination.json.data.CSRFPreventionToken }}"
+        status_code: 200
+        validate_certs: no
+      when: login_response_proxmox_destination.json is defined
+      ignore_errors: yes
+
+    - name: Display results
+      debug:
+        msg:
+          - "Vault accessible: {{ vault_health.status == 200 }}"
+          - "Source Proxmox secrets retrieved: {{ source_vault_secrets.data is defined }}"
+          - "Destination Proxmox secrets retrieved: {{ destination_vault_secrets.data is defined }}"
+          - "Network interfaces created/updated: {{ create_interface_results.results | map(attribute='item.iface') | list if create_interface_results.results is defined else 'N/A' }}"

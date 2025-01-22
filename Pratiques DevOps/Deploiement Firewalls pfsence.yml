@@ -1,0 +1,59 @@
+
+        - name: Mettre à jour les interfaces existantes sur Proxmox
+          when: interface_error
+          community.general.proxmox_nic:
+            api_host: "{{ proxmox_host }}"
+            api_user: "root@pam"
+            api_password: "{{ lookup('env', 'PROXMOX_PASSWORD') }}"
+            vmid: "{{ item.vmid }}"
+            interface: "{{ item.iface }}"
+            bridge: "{{ item.bridge_ports }}"
+            model: "virtio"
+            firewall: "{{ item.firewall | default(false) }}"
+            link_down: "{{ not item.active }}"
+            state: present
+          loop:
+            - { vmid: 100, iface: "vmbr2", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr3", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr4", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr1", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr5", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr7", bridge_ports: "", active: 1 }
+
+        - name: Appliquer les changements réseau sur Proxmox
+          command: ifreload -a
+          become: yes
+          when: interface_error
+
+        - name: Suggérer les prochaines étapes
+          debug:
+            msg: >
+              Les interfaces existantes ont été mises à jour.
+              Vérifiez la configuration réseau sur le serveur Proxmox et relancez le job Jenkins si nécessaire.
+          when: interface_error
+
+    - name: Afficher un message de succès
+      debug:
+        msg: "Le job Jenkins a réussi et aucune action supplémentaire n'est nécessaire."
+      when: job_success
+
+    - name: Analyser le contenu de la console Jenkins
+      when: not job_success
+      block:
+        - name: Rechercher des erreurs spécifiques dans la sortie de console
+          set_fact:
+            specific_errors:
+              - "{{ 'AMQPProtocolChannelException' in jenkins_response.content }}"
+              - "{{ 'NOT_FOUND no queue' in jenkins_response.content }}"
+              - "{{ 'NOT_ALLOWED - vhost' in jenkins_response.content }}"
+
+        - name: Afficher les erreurs spécifiques trouvées
+          debug:
+            msg: "Erreurs spécifiques trouvées dans la sortie de console Jenkins : {{ specific_errors | select('true') | list }}"
+
+        - name: Suggérer des actions correctives
+          debug:
+            msg: >
+              Des erreurs spécifiques ont été détectées dans la sortie de console Jenkins.
+              Veuillez vérifier l'état de RabbitMQ, les configurations de file d'attente et les autorisations de vhost.
+          when: specific_errors | select('true') | list | length > 0
