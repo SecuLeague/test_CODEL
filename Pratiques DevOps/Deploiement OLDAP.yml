@@ -1,51 +1,48 @@
-
 ---
 - name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
   hosts: localhost
   gather_facts: no
 
+  vars:
+    secret_path: "secret/data/data/jenkins_proxmox9"  # Corrigé avec le bon chemin
+    vault_url: "http://127.0.0.1:8200"  # URL de votre serveur Vault
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
+
   tasks:
-    # 1. Récupérer les secrets depuis Vault (KV v2)
-    - name: Récupérer les secrets depuis Vault (KV v2)
+    - name: Récupérer les secrets depuis Vault
       community.hashi_vault.vault_read:
-        path: "secret/data/data/jenkins_proxmox6"  # Correct Vault path
-        url: "http://10.10.150.2:8200"            # Vault server URL
-        token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Use environment variable for token
+        path: "{{ secret_path }}"
+        url: "{{ vault_url }}"
+        token: "{{ vault_token }}"
       register: secrets
 
-    # 2. Vérifier si les secrets ont été récupérés avec succès
+    # Debugging Task: Afficher la structure des secrets récupérés
+    - name: Afficher la structure des secrets récupérés
+      debug:
+        var: secrets
+
+    # Vérifier si les secrets ont été récupérés avec succès
     - name: Vérifier la récupération des secrets
       fail:
         msg: "Impossible de récupérer les secrets depuis Vault."
       when: secrets is not defined or secrets.failed
 
-    # 3. Vérifier la structure des secrets récupérés pour débogage
-    - name: Afficher la structure des secrets récupérés
-      debug:
-        var: secrets
-
-    # 4. Vérifier si la structure des secrets contient les données attendues
-    - name: Vérifier la présence des données dans la réponse Vault
-      fail:
-        msg: "Les secrets ne contiennent pas les données attendues (jenkins_url, job_name, etc.)."
-      when: secrets.data.data.data.jenkins_url is not defined
-
-    # 5. Définir les variables sensibles à partir des données récupérées depuis Vault
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
     - name: Définir les variables sensibles à partir de Vault
       set_fact:
-        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"  # Accéder correctement à la structure
         job_name: "{{ secrets.data.data.data.job_name }}"
         jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
         jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
         proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
         proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
 
-    # 6. Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
+    # Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
     - name: Construire dynamiquement l'API endpoint Jenkins
       set_fact:
         api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
 
-    # 7. Obtenir le statut du log du job Jenkins via l'API REST
+    # Obtenir le statut du log du job Jenkins via l'API REST
     - name: Obtenir le statut du log du job Jenkins
       uri:
         url: "{{ api_endpoint }}"
@@ -57,14 +54,13 @@
         force_basic_auth: yes
       register: jenkins_response
 
-    # 8. Vérifier si le job a réussi en analysant la réponse JSON de Jenkins
+    # Vérifier si le job a réussi en analysant la réponse JSON de Jenkins
     - name: Vérifier si le job a réussi
       set_fact:
         job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
 
-    # 9. Afficher un message de succès si le job a réussi
+    # Afficher un message de succès si le job a réussi
     - name: Afficher un message de succès
       debug:
         msg:
           "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
-      when: job_success
