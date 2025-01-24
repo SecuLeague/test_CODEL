@@ -3,15 +3,45 @@
   hosts: localhost
   gather_facts: no
   vars:
-    jenkins_url: "http://192.168.150.10:8080"
-    job_name: "CODEL 1.0.0 - Create Template Servers"
-    api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
-    jenkins_user: "amal"
-    jenkins_api_token: "11e6cdba6083554658c8463aaecbe80e10"
-    proxmox_host: "185.246.85.24"
-    proxmox_node: "frhb89946ds"
+    secret_path: "secret/data/data/jenkins_proxmox10"  # Chemin correct des secrets Vault
+    vault_url: "http://127.0.0.1:8200"  # URL de votre serveur Vault
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
 
   tasks:
+    - name: Récupérer les secrets depuis Vault
+      community.hashi_vault.vault_read:
+        path: "{{ secret_path }}"
+        url: "{{ vault_url }}"
+        token: "{{ vault_token }}"
+      register: secrets
+
+    # Debugging Task: Afficher la structure des secrets récupérés
+    - name: Afficher la structure des secrets récupérés
+      debug:
+        var: secrets
+
+    # Vérifier si les secrets ont été récupérés avec succès
+    - name: Vérifier la récupération des secrets
+      fail:
+        msg: "Impossible de récupérer les secrets depuis Vault."
+      when: secrets is not defined or secrets.failed
+
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
+    - name: Définir les variables sensibles à partir de Vault
+      set_fact:
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        job_name: "{{ secrets.data.data.data.job_name }}"
+        jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
+        jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
+        proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
+        proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
+
+    # Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
+    - name: Construire dynamiquement l'API endpoint Jenkins
+      set_fact:
+        api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+
+    # Obtenir le statut du log du job Jenkins via l'API REST
     - name: Obtenir le statut du log du job Jenkins
       uri:
         url: "{{ api_endpoint }}"
@@ -23,11 +53,13 @@
         force_basic_auth: yes
       register: jenkins_response
 
+    # Vérifier si le job a réussi en analysant la réponse JSON de Jenkins
     - name: Vérifier si le job a réussi
       set_fact:
         job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
 
-    - name: Afficher le statut du job
+    # Afficher un message de succès si le job a réussi
+    - name: Afficher un message de succès
       debug:
         msg: "Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}."
 
@@ -101,3 +133,7 @@
               Des erreurs spécifiques ont été détectées dans la sortie de console Jenkins.
               Veuillez vérifier l'état de RabbitMQ, les configurations de file d'attente et les autorisations de vhost.
           when: specific_errors | select('true') | list | length > 0
+
+
+
+
