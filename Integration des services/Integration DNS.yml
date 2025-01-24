@@ -4,21 +4,49 @@
   gather_facts: no
 
   vars:
-    jenkins_url: "http://192.168.150.10:8080"
-    job_name: "CODEL 1.0.0 -Create Template NACER"
-    api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
-    jenkins_user: "amal"
-    jenkins_api_token: "11e6cdba6083554658c8463aaecbe80e10"
-    proxmox_host: "185.246.85.24"
-    proxmox_node: "frhb89946ds"
+    # Pas besoin de déclarer ici les variables car elles seront définies par Vault
 
   tasks:
+    # Récupérer les secrets depuis Vault (KV v2)
+    - name: Récupérer les secrets depuis Vault (KV v2)
+      community.hashi_vault.vault_read:
+        path: "secret/data/data/data/data/jenkins_proxmox5"  # Correct Vault path
+        url: "http://10.10.150.2:8200"  # Vault server URL
+        token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Utilisation du token d'environnement Vault
+      register: secrets
+
+    # Afficher les secrets récupérés pour débogage
+    - name: Afficher les secrets récupérés pour débogage
+      debug:
+        var: secrets
+
+    # Vérification de la récupération des secrets
+    - name: Vérifier la récupération des secrets
+      fail:
+        msg: "Impossible de récupérer les secrets depuis Vault."
+      when: secrets is not defined or secrets.failed
+
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
+    - name: Définir les variables sensibles à partir de Vault
+      set_fact:
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        job_name: "{{ secrets.data.data.data.job_name }}"
+        jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
+        jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
+        proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
+        proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
+
+    # Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
+    - name: Construire dynamiquement l'API endpoint Jenkins
+      set_fact:
+        api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+
     # Debugging the constructed API endpoint
     - name: Afficher l'API endpoint générée
       debug:
         msg: "API Endpoint : {{ api_endpoint }}"
 
-    # Test Jenkins API using curl for debugging
+    # Tester l'API Jenkins avec curl pour débogage
     - name: Tester l'API Jenkins avec curl
       command: >
         curl --user {{ jenkins_user }}:"{{ jenkins_api_token }}"
@@ -26,19 +54,19 @@
       register: curl_response
       ignore_errors: yes
 
-    # Debugging the response from curl
+    # Afficher la réponse de la commande curl
     - name: Afficher la réponse de la commande curl
       debug:
         var: curl_response.stdout
 
-    # Check if the curl command succeeded or failed
+    # Vérifier si la commande curl a échoué
     - name: Vérifier si la commande curl a réussi
       fail:
         msg: "La commande curl a échoué avec le message suivant : {{ curl_response.stderr }}"
       when:
         - curl_response.rc != 0
 
-    # Fetch the Jenkins job log using Ansible's uri module
+    # Obtenir le statut du log du job Jenkins via l'API REST
     - name: Obtenir le statut du log du job Jenkins via l'API REST
       uri:
         url: "{{ api_endpoint }}"
@@ -50,19 +78,19 @@
         force_basic_auth: yes
       register: jenkins_response
 
-    # Check if the API request succeeded or failed (HTTP status code)
+    # Vérifier la réponse API Jenkins
     - name: Vérifier la réponse API Jenkins
       fail:
         msg: "Erreur lors de la requête API Jenkins : {{ jenkins_response.msg }}"
       when:
         - jenkins_response.status != 200
 
-    # Determine if the Jenkins job succeeded based on its output
+    # Vérifier si le job Jenkins a réussi en analysant la réponse JSON de Jenkins
     - name: Vérifier si le job a réussi
       set_fact:
         job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
 
-    # Display the status of the Jenkins job (success or failure)
+    # Afficher le statut du job Jenkins (réussi ou échoué)
     - name: Afficher le statut du job Jenkins
       debug:
         msg:
