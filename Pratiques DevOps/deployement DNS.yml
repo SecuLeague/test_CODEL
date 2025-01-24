@@ -2,16 +2,58 @@
 - name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
   hosts: localhost
   gather_facts: no
+
   vars:
-    jenkins_url: "http://192.168.150.10:8080"
-    job_name: "CODEL 1.0.0 - Deploy NACER"
-    api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
-    jenkins_user: "amal"
-    jenkins_api_token: "11e6cdba6083554658c8463aaecbe80e10"
-    proxmox_host: "185.246.85.24"
-    proxmox_node: "frhb89946ds"
+    vault_path: "secret/data/data/jenkins_proxmox11"  # Ajustez le chemin si nécessaire
+    vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que votre VAULT_TOKEN est défini
 
   tasks:
+    # Récupérer les secrets depuis Vault
+    - name: Récupérer les secrets depuis Vault
+      community.hashi_vault.vault_read:
+        path: "{{ vault_path }}"
+        url: "{{ vault_url }}"
+        token: "{{ vault_token }}"
+      register: secrets
+
+    # Afficher la structure complète des secrets récupérés
+    - name: Afficher la structure complète des secrets
+      debug:
+        var: secrets
+
+    # Vérifier si les secrets ont été récupérés avec succès
+    - name: Vérifier la récupération des secrets
+      fail:
+        msg: "Impossible de récupérer les secrets depuis Vault."
+      when: secrets is not defined or secrets.failed
+
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
+    - name: Définir les variables sensibles à partir de Vault
+      set_fact:
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        job_name: "{{ secrets.data.data.data.job_name }}"
+        jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
+        jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
+        proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
+        proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
+
+    # Vérification que les variables sont bien définies
+    - name: Vérifier que les variables sont bien définies
+      debug:
+        msg: "jenkins_url: {{ jenkins_url }}, job_name: {{ job_name }}"
+
+    # Construire dynamiquement l'API endpoint Jenkins avec encodage du nom du job
+    - name: Construire dynamiquement l'API endpoint Jenkins
+      set_fact:
+        api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+
+    # Afficher l'URL de l'API Jenkins construite pour débogage
+    - name: Afficher l'URL de l'API Jenkins construite
+      debug:
+        msg: "L'URL de l'API Jenkins est : {{ api_endpoint }}"
+
+    # Obtenir le statut du log du job Jenkins via l'API REST
     - name: Obtenir le statut du log du job Jenkins
       uri:
         url: "{{ api_endpoint }}"
@@ -23,26 +65,34 @@
         force_basic_auth: yes
       register: jenkins_response
 
+    # Vérifier si le job a réussi en analysant la réponse JSON de Jenkins
     - name: Vérifier si le job a réussi
       set_fact:
         job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
 
-    - name: Afficher le statut du job
+    # Afficher un message de succès si le job a réussi
+    - name: Afficher un message de succès
       debug:
-        msg: "Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}."
+        msg:
+          "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
+      when: job_success
 
-    - name: Gérer les erreurs spécifiques
+    # Si le job échoue, gérer les erreurs spécifiques
+    - name: Gérer les erreurs spécifiques si le job échoue
       when: not job_success
       block:
+        # Vérifier l'erreur 'interface already exists'
         - name: Vérifier l'erreur 'interface already exists'
           set_fact:
             interface_error: "{{ 'interface already exists' in jenkins_response.content }}"
 
+        # Afficher l'erreur spécifique si une interface existe déjà
         - name: Afficher l'erreur spécifique
           debug:
             msg: "Le job a échoué car des interfaces existent déjà sur le serveur Proxmox de destination."
           when: interface_error
 
+        # Mettre à jour les interfaces existantes sur Proxmox
         - name: Mettre à jour les interfaces existantes sur Proxmox
           when: interface_error
           community.general.proxmox_nic:
@@ -64,40 +114,16 @@
             - { vmid: 100, iface: "vmbr5", bridge_ports: "", active: 1 }
             - { vmid: 100, iface: "vmbr7", bridge_ports: "", active: 1 }
 
+        # Appliquer les changements réseau sur Proxmox
         - name: Appliquer les changements réseau sur Proxmox
           command: ifreload -a
           become: yes
           when: interface_error
 
+        # Suggérer les prochaines étapes
         - name: Suggérer les prochaines étapes
           debug:
             msg: >
               Les interfaces existantes ont été mises à jour.
               Vérifiez la configuration réseau sur le serveur Proxmox et relancez le job Jenkins si nécessaire.
           when: interface_error
-
-    - name: Afficher un message de succès
-      debug:
-        msg: "Le job Jenkins a réussi et aucune action supplémentaire n'est nécessaire."
-      when: job_success
-
-    - name: Analyser le contenu de la console Jenkins
-      when: not job_success
-      block:
-        - name: Rechercher des erreurs spécifiques dans la sortie de console
-          set_fact:
-            specific_errors:
-              - "{{ 'AMQPProtocolChannelException' in jenkins_response.content }}"
-              - "{{ 'NOT_FOUND no queue' in jenkins_response.content }}"
-              - "{{ 'NOT_ALLOWED - vhost' in jenkins_response.content }}"
-
-        - name: Afficher les erreurs spécifiques trouvées
-          debug:
-            msg: "Erreurs spécifiques trouvées dans la sortie de console Jenkins : {{ specific_errors | select('true') | list }}"
-
-        - name: Suggérer des actions correctives
-          debug:
-            msg: >
-              Des erreurs spécifiques ont été détectées dans la sortie de console Jenkins.
-              Veuillez vérifier l'état de RabbitMQ, les configurations de file d'attente et les autorisations de vhost.
-          when: specific_errors | select('true') | list | length > 0
