@@ -8,9 +8,8 @@
     - name: Récupérer les secrets depuis Vault (KV v2)
       community.hashi_vault.vault_read:
         path: "secret/data/data/jenkins_proxmox6"  # Correct Vault path
-      # url: "http://10.10.150.2:8200"            # Vault server URL
-        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
-        token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Use environment variable for token
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # URL de Vault depuis la variable d'environnement
+        token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Utilisation du token depuis l'environnement
       register: secrets
 
     # 2. Vérifier si les secrets ont été récupérés avec succès
@@ -65,6 +64,5 @@
     # 9. Afficher un message de succès si le job a réussi
     - name: Afficher un message de succès
       debug:
-        msg:
-          "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
+        msg: "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
       when: job_success
