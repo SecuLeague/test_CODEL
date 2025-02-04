@@ -4,13 +4,28 @@
   connection: local
   gather_facts: no
 
-  vars:
-    vault_addr: "http://127.0.0.1:8200"
-    vault_token: "hvs.DEHrf26A2FphnKgKm376o0kZ"
-    proxmox_source_environment: "dev"
-    proxmox_destination_environment: "qua"
-
   tasks:
+    - name: Récupérer les secrets depuis Vault (KV v2)
+      community.hashi_vault.vault_read:
+        path: "secret/data/jenkins_proxmox12"
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+      register: secrets
+      ignore_errors: yes
+
+    - name: Debug Vault secrets
+      debug:
+        var: secrets
+      when: secrets is defined
+
+    - name: Set variables from Vault secrets
+      set_fact:
+        vault_addr: "{{ secrets.data.data.vault_addr | default(omit) }}"
+        vault_token: "{{ secrets.data.data.vault_token | default(omit) }}"
+        proxmox_source_environment: "{{ secrets.data.data.proxmox_source_environment | default(omit) }}"
+        proxmox_destination_environment: "{{ secrets.data.data.proxmox_destination_environment | default(omit) }}"
+      ignore_errors: yes
+
     - name: Ensure Vault is unsealed and accessible
       uri:
         url: "{{ vault_addr }}/v1/sys/health"
@@ -130,7 +145,7 @@
     - name: Display results
       debug:
         msg:
-          - "Vault accessible: {{ vault_health.status == 200 }}"
-          - "Source Proxmox secrets retrieved: {{ source_vault_secrets.data is defined }}"
-          - "Destination Proxmox secrets retrieved: {{ destination_vault_secrets.data is defined }}"
-          - "Network interfaces created/updated: {{ create_interface_results.results | map(attribute='item.iface') | list if create_interface_results.results is defined else 'N/A' }}"
+          - "Vault accessible: {{ vault_health.status == 200 if vault_health is defined and vault_health.status is defined else 'N/A' }}"
+          - "Source Proxmox secrets retrieved: {{ 'Yes' if source_vault_secrets is defined and source_vault_secrets.data is defined else 'No' }}"
+          - "Destination Proxmox secrets retrieved: {{ 'Yes' if destination_vault_secrets is defined and destination_vault_secrets.data is defined else 'No' }}"
+          - "Network interfaces created/updated: {{ create_interface_results.results | map(attribute='item.iface') | list if create_interface_results is defined and create_interface_results.results is defined else 'N/A' }}"
