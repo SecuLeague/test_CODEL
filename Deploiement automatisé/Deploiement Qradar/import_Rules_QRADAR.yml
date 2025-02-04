@@ -4,7 +4,7 @@
   gather_facts: no
 
   vars:
-    vault_addr: "http://10.10.150.2:8200"
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que VAULT_TOKEN est défini dans votre environnement
     job_name: "CODEL1.0.0- Import Rules QRADAR"  # Job name que vous avez fourni
 
