@@ -5,7 +5,8 @@
 
   vars:
     secret_path: "secret/data/data/jenkins_proxmox9"  # Corrigé avec le bon chemin
-    vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
+    #vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
 
   tasks:
