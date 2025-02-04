@@ -5,7 +5,8 @@
   vars:
     # Token Vault
     #: "hvs.hC3ZmWzkBFC4EsxhqjqTlZdh"  # Utilisez votre token ici
-    vault_url: "http://10.10.150.2:8200"  # URL de votre instance Vault
+    #vault_url: "http://10.10.150.2:8200"  # URL de votre instance Vault
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
 
     # Récupération des secrets depuis Vault avec le token et l'URL spécifié
     ansible_become_value: "{{ lookup('community.hashi_vault.hashi_vault', 'secret=secret/all_vars ansible_become=value', url=vault_url, token=vault_token) | bool }}"
