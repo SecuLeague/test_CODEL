@@ -4,7 +4,8 @@
   gather_facts: no
 
   vars:
-    vault_addr: "http://10.10.150.2:8200"  # URL du serveur Vault
+    #vault_addr: "http://10.10.150.2:8200"  # URL du serveur Vault
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Token Vault depuis une variable d'environnement ou directement dans le fichier
     vault_path: "secret/data/proxmox/parameters"  # Chemin des secrets dans Vault
 
