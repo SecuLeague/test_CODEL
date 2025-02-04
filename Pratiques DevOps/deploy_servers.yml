@@ -4,16 +4,15 @@
   gather_facts: no
   vars:
     secret_path: "secret/data/data/jenkins_proxmox10"  # Chemin correct des secrets Vault
-    #vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
-    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # Utilisation de l'URL depuis l'environnement
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
 
   tasks:
     - name: Récupérer les secrets depuis Vault
       community.hashi_vault.vault_read:
         path: "{{ secret_path }}"
-        url: "{{ vault_url }}"
-        token: "{{ vault_token }}"
+        url: "{{ url }}"  # Utilisation de la variable 'url' pour l'URL de Vault
+        token: "{{ vault_token }}"  # Utilisation du token défini dans l'environnement
       register: secrets
 
     # Debugging Task: Afficher la structure des secrets récupérés
@@ -134,7 +133,3 @@
               Des erreurs spécifiques ont été détectées dans la sortie de console Jenkins.
               Veuillez vérifier l'état de RabbitMQ, les configurations de file d'attente et les autorisations de vhost.
           when: specific_errors | select('true') | list | length > 0
-
-
-
-
