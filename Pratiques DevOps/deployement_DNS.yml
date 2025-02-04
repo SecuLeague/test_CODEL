@@ -5,8 +5,8 @@
 
   vars:
     vault_path: "secret/data/data/jenkins_proxmox11"  # Ajustez le chemin si nécessaire
-    #vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
-    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    # Utilisation de la variable d'environnement VAULT_ADDR
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # Assurez-vous que cette variable est bien définie
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que votre VAULT_TOKEN est défini
 
   tasks:
@@ -14,7 +14,7 @@
     - name: Récupérer les secrets depuis Vault
       community.hashi_vault.vault_read:
         path: "{{ vault_path }}"
-        url: "{{ vault_url }}"
+        url: "{{ vault_addr }}"  # Utilisation de vault_addr au lieu de vault_url
         token: "{{ vault_token }}"
       register: secrets
 
