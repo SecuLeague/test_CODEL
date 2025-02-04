@@ -4,12 +4,23 @@
   gather_facts: no
   become: yes
   vars:
-    # Utilisation d'un lookup avec un chemin plus direct
-    ansible_ssh_common_args: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
-    ansible_become_password: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
-    ansible_ssh_pass: "{{ lookup('community.hashi_vault.hashi_vault', 'secret/data/all_vars', token='hvs.hC3ZmWzkBFC4EsxhqjqTlZdh', url='http://10.10.150.2:8200') }}"
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
 
   tasks:
+    - name: Récupérer les secrets depuis Vault
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: secret/data/all_vars
+      register: vault_secrets
+
+    - name: Définir les variables à partir des secrets Vault
+      set_fact:
+        ansible_ssh_common_args: "{{ vault_secrets.data.data.ansible_ssh_common_args | default('') }}"
+        ansible_become_password: "{{ vault_secrets.data.data.ansible_become_password | default('') }}"
+        ansible_ssh_pass: "{{ vault_secrets.data.data.ansible_ssh_pass | default('') }}"
+
     # Debug : Afficher les valeurs récupérées depuis Vault
     - name: Debug - Afficher ansible_ssh_common_args
       debug:
