@@ -1,4 +1,3 @@
----
 - name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
   hosts: localhost
   gather_facts: no
@@ -8,7 +7,7 @@
     - name: Récupérer les secrets depuis Vault (KV v2)
       community.hashi_vault.vault_read:
         path: "secret/data/data/jenkins_proxmox4"  # Correct path for KV v2
-        url: "http://10.10.150.2:8200"            # Vault server URL
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
         token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Use environment variable for token
       register: secrets
 
@@ -82,4 +81,4 @@
     - name: Afficher le statut du job Jenkins
       debug:
         msg:
-          Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}.
+          Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}
