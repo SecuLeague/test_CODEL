@@ -4,8 +4,8 @@
   gather_facts: no
 
   vars:
-    # Vous pouvez définir vault_addr directement ici si vous ne l'avez pas dans l'environnement
-    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') | default('http://10.10.150.2:8200') }}"  # Utilise VAULT_ADDR de l'environnement ou valeur par défaut
+    # Récupérer l'adresse Vault depuis la variable d'environnement VAULT_ADDR sans valeur par défaut
+    vault_addr: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # L'adresse Vault est récupérée depuis la variable d'environnement
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Token Vault depuis une variable d'environnement ou directement dans le fichier
     vault_path: "secret/data/proxmox/parameters"  # Chemin des secrets dans Vault
 
@@ -19,8 +19,8 @@
     # Récupérer les secrets depuis Vault
     - name: Récupérer les secrets depuis Vault
       community.hashi_vault.vault_read:
-        url: "{{ vault_addr }}"
-        token: "{{ vault_token }}"
+        url: "{{ vault_addr }}"  # Utilisation de la variable d'environnement VAULT_ADDR (sans valeur par défaut)
+        token: "{{ vault_token }}"  # Token Vault depuis la variable d'environnement
         path: "{{ vault_path }}"
       register: vault_secrets
 
@@ -41,7 +41,7 @@
         proxmox_source_environment: "{{ vault_secrets.data.data.data.proxmox_source_environment }}"
         proxmox_destination_environment: "{{ vault_secrets.data.data.data.proxmox_destination_environment }}"
         ssh_host: "{{ vault_secrets.data.data.data.ssh_host }}"
-        vault_addr: "{{ vault_secrets.data.data.data.vault_addr }}"  # Notez que vous pouvez redéfinir cette variable si nécessaire
+        vault_addr: "{{ vault_secrets.data.data.data.vault_addr }}"  # Vous pouvez redéfinir cette variable si nécessaire
         vault_token: "{{ vault_secrets.data.data.data.vault_token }}"  # Idem pour le token
 
     # Afficher les valeurs des variables définies
