@@ -1,19 +1,17 @@
----
 - name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
   hosts: localhost
   gather_facts: no
 
   vars:
     secret_path: "secret/data/data/jenkins_proxmox9"  # Corrigé avec le bon chemin
-    #vault_url: "http://10.10.150.2:8200"  # URL de votre serveur Vault
-    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # URL de Vault depuis les variables d'environnement
     vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
 
   tasks:
     - name: Récupérer les secrets depuis Vault
       community.hashi_vault.vault_read:
         path: "{{ secret_path }}"
-        url: "{{ vault_url }}"
+        url: "{{ url }}"  # Utilisation de la variable "url" définie ci-dessus
         token: "{{ vault_token }}"
       register: secrets
 
@@ -63,5 +61,5 @@
     # Afficher un message de succès si le job a réussi
     - name: Afficher un message de succès
       debug:
-        msg:
-          "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
+        msg: "Le job Jenkins '{{ job_name }}' a réussi et aucune action supplémentaire n'est nécessaire."
+      when: job_success
