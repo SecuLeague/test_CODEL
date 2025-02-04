@@ -11,7 +11,8 @@
     - name: Récupérer les secrets depuis Vault (KV v2)
       community.hashi_vault.vault_read:
         path: "secret/data/data/data/data/jenkins_proxmox5"  # Correct Vault path
-        url: "http://10.10.150.2:8200"  # Vault server URL
+        #url: "http://10.10.150.2:8200"  # Vault server URL
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
         token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Utilisation du token d'environnement Vault
       register: secrets
 
