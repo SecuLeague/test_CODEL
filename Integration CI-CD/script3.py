@@ -122,9 +122,9 @@ def get_repository_contents(token, repo_name, local_path):
         print(f"Contenu récupéré du dépôt {repo_name}: {len(contents)} éléments")
 
         # Cloner le dépôt localement pour avoir les fichiers disponibles sur le disque
-        if os.path.exists(local_path):
-            shutil.rmtree(local_path)  # Supprime l'ancien répertoire s'il existe
-        os.makedirs(local_path)  # Crée un nouveau répertoire pour cloner le dépôt
+       # if os.path.exists(local_path):
+        #    shutil.rmtree(local_path)  # Supprime l'ancien répertoire s'il existe
+       # os.makedirs(local_path)  # Crée un nouveau répertoire pour cloner le dépôt
 
         # Utilisation de Git pour cloner le dépôt localement
         subprocess.run(["git", "clone", f"https://github.com/{repo_name}.git", local_path])
