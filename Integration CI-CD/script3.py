@@ -164,7 +164,7 @@ def get_repository_contents(token, repo_name, local_path):
 
 if __name__ == "__main__":
     # Définir le token GitHub directement dans le script
-    github_token = "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" # Remplacez ceci par votre token GitHub
+    github_token = "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" # Remplacez ceci par votre token GitHub
     local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
 
     if github_token:
