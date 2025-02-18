@@ -162,13 +162,23 @@ def get_repository_contents(token, repo_name, local_path):
     # Une fois tous les tests exécutés, générer le rapport
     generate_test_report(test_results)
 
-if __name__ == "__main__":
+#if __name__ == "__main__":
     # Définir le token GitHub directement dans le script
-    github_token = "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" # Remplacez ceci par votre token GitHub
+ #   github_token = "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" # Remplacez ceci par votre token GitHub
+  #  local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
+
+   # if github_token:
+    #    repo_name = "SecuLeague/test_CODEL"  # Utilisation du dépôt spécifique
+     #   get_repository_contents(github_token, repo_name, local_path)
+    #else:
+     #   print("Erreur : Le token GitHub n'est pas défini.")
+if __name__ == "__main__":
+    # Récupérer le token GitHub depuis une variable d'environnement
+    github_token = os.environ.get("GITHUB_TOKEN")
     local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
 
     if github_token:
         repo_name = "SecuLeague/test_CODEL"  # Utilisation du dépôt spécifique
         get_repository_contents(github_token, repo_name, local_path)
     else:
-        print("Erreur : Le token GitHub n'est pas défini.")
+        print("Erreur : Le token GitHub n'est pas défini dans les variables d'environnement.")
