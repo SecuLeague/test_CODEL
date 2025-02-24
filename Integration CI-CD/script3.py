@@ -122,12 +122,12 @@ def get_repository_contents(token, repo_name, local_path):
         print(f"Contenu récupéré du dépôt {repo_name}: {len(contents)} éléments")
 
         # Cloner le dépôt localement pour avoir les fichiers disponibles sur le disque
-        if os.path.exists(local_path):
-            shutil.rmtree(local_path)  # Supprime l'ancien répertoire s'il existe
-        os.makedirs(local_path)  # Crée un nouveau répertoire pour cloner le dépôt
+       # if os.path.exists(local_path):
+        #    shutil.rmtree(local_path)  # Supprime l'ancien répertoire s'il existe
+        #os.makedirs(local_path)  # Crée un nouveau répertoire pour cloner le dépôt
 
         # Utilisation de Git pour cloner le dépôt localement
-        subprocess.run(["git", "clone", f"https://github.com/{repo_name}.git", local_path])
+        #subprocess.run(["git", "clone", f"https://github.com/{repo_name}.git", local_path])
 
         # Fonction pour explorer récursivement les répertoires et afficher leur contenu
         def explore_directory(path, contents, case_id):
@@ -163,22 +163,13 @@ def get_repository_contents(token, repo_name, local_path):
     generate_test_report(test_results)
 
 if __name__ == "__main__":
-    Définir le token GitHub directement dans le script
-    github_token = "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" # Remplacez ceci par votre token GitHub
-   local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
+    # Définir le token GitHub directement dans le script
+    github_token = "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" # Remplacez ceci par votre token GitHub
+    local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
 
-   if github_token:
-       repo_name = "SecuLeague/test_CODEL"  # Utilisation du dépôt spécifique
+    if github_token:
+        repo_name = "SecuLeague/test_CODEL"  # Utilisation du dépôt spécifique
         get_repository_contents(github_token, repo_name, local_path)
     else:
         print("Erreur : Le token GitHub n'est pas défini.")
-#if __name__ == "__main__":
-    # Récupérer le token GitHub depuis une variable d'environnement
-    #github_token = os.environ.get("GITHUB_TOKEN")
-    #local_path = "test_CODEL"  # Chemin local pour cloner le dépôt
 
-    #if github_token:
-      #  repo_name = "SecuLeague/test_CODEL"  # Utilisation du dépôt spécifique
-     #   get_repository_contents(github_token, repo_name, local_path)
-    #else:
-      #  print("Erreur : Le token GitHub n'est pas défini dans les variables d'environnement.")
