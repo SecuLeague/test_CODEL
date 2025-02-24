@@ -1,0 +1,98 @@
+---
+- name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
+  hosts: localhost
+  gather_facts: no
+
+  vars:
+    # Pas besoin de déclarer ici les variables car elles seront définies par Vault
+
+  tasks:
+    # Récupérer les secrets depuis Vault (KV v2)
+    - name: Récupérer les secrets depuis Vault (KV v2)
+      community.hashi_vault.vault_read:
+        path: "secret/data/data/data/data/jenkins_proxmox5"  # Correct Vault path
+        #url: "http://10.10.150.2:8200"  # Vault server URL
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Utilisation du token d'environnement Vault
+      register: secrets
+
+    # Afficher les secrets récupérés pour débogage
+    - name: Afficher les secrets récupérés pour débogage
+      debug:
+        var: secrets
+
+    # Vérification de la récupération des secrets
+    - name: Vérifier la récupération des secrets
+      fail:
+        msg: "Impossible de récupérer les secrets depuis Vault."
+      when: secrets is not defined or secrets.failed
+
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
+    - name: Définir les variables sensibles à partir de Vault
+      set_fact:
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        job_name: "{{ secrets.data.data.data.job_name }}"
+        jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
+        jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
+        proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
+        proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
+
+    # Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
+    - name: Construire dynamiquement l'API endpoint Jenkins
+      set_fact:
+        api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+
+    # Debugging the constructed API endpoint
+    - name: Afficher l'API endpoint générée
+      debug:
+        msg: "API Endpoint : {{ api_endpoint }}"
+
+    # Tester l'API Jenkins avec curl pour débogage
+    - name: Tester l'API Jenkins avec curl
+      command: >
+        curl --user {{ jenkins_user }}:"{{ jenkins_api_token }}"
+        "{{ api_endpoint }}"
+      register: curl_response
+      ignore_errors: yes
+
+    # Afficher la réponse de la commande curl
+    - name: Afficher la réponse de la commande curl
+      debug:
+        var: curl_response.stdout
+
+    # Vérifier si la commande curl a échoué
+    - name: Vérifier si la commande curl a réussi
+      fail:
+        msg: "La commande curl a échoué avec le message suivant : {{ curl_response.stderr }}"
+      when:
+        - curl_response.rc != 0
+
+    # Obtenir le statut du log du job Jenkins via l'API REST
+    - name: Obtenir le statut du log du job Jenkins via l'API REST
+      uri:
+        url: "{{ api_endpoint }}"
+        method: GET
+        return_content: yes
+        status_code: 200
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_api_token }}"
+        force_basic_auth: yes
+      register: jenkins_response
+
+    # Vérifier la réponse API Jenkins
+    - name: Vérifier la réponse API Jenkins
+      fail:
+        msg: "Erreur lors de la requête API Jenkins : {{ jenkins_response.msg }}"
+      when:
+        - jenkins_response.status != 200
+
+    # Vérifier si le job Jenkins a réussi en analysant la réponse JSON de Jenkins
+    - name: Vérifier si le job a réussi
+      set_fact:
+        job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
+
+    # Afficher le statut du job Jenkins (réussi ou échoué)
+    - name: Afficher le statut du job Jenkins
+      debug:
+        msg:
+          Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}.
