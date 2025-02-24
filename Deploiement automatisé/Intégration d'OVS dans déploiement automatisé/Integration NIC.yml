@@ -1,0 +1,151 @@
+---
+- name: Collect network information from Proxmox servers and configure
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  tasks:
+    - name: Récupérer les secrets depuis Vault (KV v2)
+      community.hashi_vault.vault_read:
+        path: "secret/data/jenkins_proxmox12"
+        url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"
+        token: "{{ lookup('ansible.builtin.env', 'VAULT_TOKEN') }}"
+      register: secrets
+      ignore_errors: yes
+
+    - name: Debug Vault secrets
+      debug:
+        var: secrets
+      when: secrets is defined
+
+    - name: Set variables from Vault secrets
+      set_fact:
+        vault_addr: "{{ secrets.data.data.vault_addr | default(omit) }}"
+        vault_token: "{{ secrets.data.data.vault_token | default(omit) }}"
+        proxmox_source_environment: "{{ secrets.data.data.proxmox_source_environment | default(omit) }}"
+        proxmox_destination_environment: "{{ secrets.data.data.proxmox_destination_environment | default(omit) }}"
+      ignore_errors: yes
+
+    - name: Ensure Vault is unsealed and accessible
+      uri:
+        url: "{{ vault_addr }}/v1/sys/health"
+        method: GET
+        status_code: 200
+      register: vault_health
+      ignore_errors: yes
+
+    - name: Display Vault health status
+      debug:
+        var: vault_health
+
+    - name: Retrieve Proxmox source secrets from Vault
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/{{ proxmox_source_environment }}"
+      register: source_vault_secrets
+      ignore_errors: yes
+
+    - name: Retrieve Proxmox destination secrets from Vault
+      community.hashi_vault.vault_read:
+        url: "{{ vault_addr }}"
+        token: "{{ vault_token }}"
+        path: "secret/data/proxmox/{{ proxmox_destination_environment }}"
+      register: destination_vault_secrets
+      ignore_errors: yes
+
+    - name: Display Proxmox secrets
+      debug:
+        msg:
+          - "Proxmox Dev Secrets: {{ source_vault_secrets.data.data | default('N/A') }}"
+          - "Proxmox Qua Secrets: {{ destination_vault_secrets.data.data | default('N/A') }}"
+
+    - name: Log in to Proxmox API and get authentication ticket for source Proxmox
+      uri:
+        url: "https://{{ source_vault_secrets.data.data.ip | default('') }}:8006/api2/json/access/ticket"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ source_vault_secrets.data.data.user | default('') }}"
+          password: "{{ source_vault_secrets.data.data.password | default('') }}"
+        status_code: 200
+        validate_certs: no
+      register: login_response_proxmox_source
+      when: source_vault_secrets.data is defined and source_vault_secrets.data.data.ip is defined
+      ignore_errors: yes
+
+    - name: Get network information from source Proxmox
+      uri:
+        url: "https://{{ source_vault_secrets.data.data.ip | default('') }}:8006/api2/json/nodes/{{ source_vault_secrets.data.data.node | default('') }}/network"
+        method: GET
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_source.json.data.ticket | default('') }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_source.json.data.CSRFPreventionToken | default('') }}"
+        status_code: 200
+        validate_certs: no
+      register: proxmox_source_network_info
+      when: login_response_proxmox_source.json is defined and source_vault_secrets.data.data.ip is defined
+      ignore_errors: yes
+
+    - name: Filter network information
+      set_fact:
+        filtered_network_info: "{{ proxmox_source_network_info.json.data | default([]) | selectattr('iface', 'match', '^vmbr[1-9]+$') | list }}"
+      when: proxmox_source_network_info.json is defined
+
+    - name: Log in to Proxmox API and get authentication ticket for destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip | default('') }}:8006/api2/json/access/ticket"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ destination_vault_secrets.data.data.user | default('') }}"
+          password: "{{ destination_vault_secrets.data.data.password | default('') }}"
+        status_code: 200
+        validate_certs: no
+      register: login_response_proxmox_destination
+      when: destination_vault_secrets.data is defined and destination_vault_secrets.data.data.ip is defined
+      ignore_errors: yes
+
+    - name: Create or update vmbr interfaces on destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip | default('') }}:8006/api2/json/nodes/{{ destination_vault_secrets.data.data.node | default('') }}/network"
+        method: POST
+        body_format: json
+        body:
+          type: bridge
+          iface: "{{ item.iface }}"
+          comments: "{{ item.comments | default('') }}"
+          autostart: "{{ item.autostart }}"
+          bridge_ports: "{{ item.bridge_ports | default('') }}"
+          bridge_stp: "{{ item.bridge_stp | default('off') }}"
+          bridge_fd: "{{ item.bridge_fd | default('0') }}"
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_destination.json.data.ticket | default('') }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_destination.json.data.CSRFPreventionToken | default('') }}"
+        status_code: [200, 400]
+        validate_certs: no
+      loop: "{{ filtered_network_info | default([]) }}"
+      register: create_interface_results
+      failed_when: false
+      when: login_response_proxmox_destination.json is defined and filtered_network_info is defined and destination_vault_secrets.data.data.ip is defined
+      ignore_errors: yes
+
+    - name: Apply network changes on destination Proxmox
+      uri:
+        url: "https://{{ destination_vault_secrets.data.data.ip | default('') }}:8006/api2/json/nodes/{{ destination_vault_secrets.data.data.node | default('') }}/network"
+        method: PUT
+        headers:
+          Cookie: "PVEAuthCookie={{ login_response_proxmox_destination.json.data.ticket | default('') }}"
+          CSRFPreventionToken: "{{ login_response_proxmox_destination.json.data.CSRFPreventionToken | default('') }}"
+        status_code: 200
+        validate_certs: no
+      when: login_response_proxmox_destination.json is defined and destination_vault_secrets.data.data.ip is defined
+      ignore_errors: yes
+
+    - name: Display results
+      debug:
+        msg:
+          - "Vault accessible: {{ vault_health.status == 200 if vault_health is defined and vault_health.status is defined else 'N/A' }}"
+          - "Source Proxmox secrets retrieved: {{ 'Yes' if source_vault_secrets is defined and source_vault_secrets.data is defined else 'No' }}"
+          - "Destination Proxmox secrets retrieved: {{ 'Yes' if destination_vault_secrets is defined and destination_vault_secrets.data is defined else 'No' }}"
+          - "Network interfaces created/updated: {{ create_interface_results.results | map(attribute='item.iface') | list if create_interface_results is defined and create_interface_results.results is defined else 'N/A' }}"

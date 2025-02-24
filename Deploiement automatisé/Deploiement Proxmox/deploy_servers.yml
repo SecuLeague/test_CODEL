@@ -1,0 +1,135 @@
+---
+- name: Vérifier le statut du job Jenkins et gérer les interfaces Proxmox
+  hosts: localhost
+  gather_facts: no
+  vars:
+    secret_path: "secret/data/data/jenkins_proxmox10"  # Chemin correct des secrets Vault
+    url: "{{ lookup('ansible.builtin.env', 'VAULT_ADDR') }}"  # Utilisation de l'URL depuis l'environnement
+    vault_token: "{{ lookup('env', 'VAULT_TOKEN') }}"  # Assurez-vous que le token est défini comme variable d'environnement
+
+  tasks:
+    - name: Récupérer les secrets depuis Vault
+      community.hashi_vault.vault_read:
+        path: "{{ secret_path }}"
+        url: "{{ url }}"  # Utilisation de la variable 'url' pour l'URL de Vault
+        token: "{{ vault_token }}"  # Utilisation du token défini dans l'environnement
+      register: secrets
+
+    # Debugging Task: Afficher la structure des secrets récupérés
+    - name: Afficher la structure des secrets récupérés
+      debug:
+        var: secrets
+
+    # Vérifier si les secrets ont été récupérés avec succès
+    - name: Vérifier la récupération des secrets
+      fail:
+        msg: "Impossible de récupérer les secrets depuis Vault."
+      when: secrets is not defined or secrets.failed
+
+    # Définir les variables sensibles à partir des données récupérées depuis Vault
+    - name: Définir les variables sensibles à partir de Vault
+      set_fact:
+        jenkins_url: "{{ secrets.data.data.data.jenkins_url }}"
+        job_name: "{{ secrets.data.data.data.job_name }}"
+        jenkins_user: "{{ secrets.data.data.data.jenkins_user }}"
+        jenkins_api_token: "{{ secrets.data.data.data.jenkins_api_token }}"
+        proxmox_host: "{{ secrets.data.data.data.proxmox_host }}"
+        proxmox_node: "{{ secrets.data.data.data.proxmox_node }}"
+
+    # Construire dynamiquement l'API endpoint Jenkins avec consoleText inclus
+    - name: Construire dynamiquement l'API endpoint Jenkins
+      set_fact:
+        api_endpoint: "{{ jenkins_url }}/job/{{ job_name | urlencode }}/lastBuild/consoleText/api/json"
+
+    # Obtenir le statut du log du job Jenkins via l'API REST
+    - name: Obtenir le statut du log du job Jenkins
+      uri:
+        url: "{{ api_endpoint }}"
+        method: GET
+        return_content: yes
+        status_code: 200
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_api_token }}"
+        force_basic_auth: yes
+      register: jenkins_response
+
+    # Vérifier si le job a réussi en analysant la réponse JSON de Jenkins
+    - name: Vérifier si le job a réussi
+      set_fact:
+        job_success: "{{ 'Finished: SUCCESS' in jenkins_response.content }}"
+
+    # Afficher un message de succès si le job a réussi
+    - name: Afficher un message de succès
+      debug:
+        msg: "Le job Jenkins '{{ job_name }}' a {% if job_success %}réussi{% else %}échoué{% endif %}."
+
+    - name: Gérer les erreurs spécifiques
+      when: not job_success
+      block:
+        - name: Vérifier l'erreur 'interface already exists'
+          set_fact:
+            interface_error: "{{ 'interface already exists' in jenkins_response.content }}"
+
+        - name: Afficher l'erreur spécifique
+          debug:
+            msg: "Le job a échoué car des interfaces existent déjà sur le serveur Proxmox de destination."
+          when: interface_error
+
+        - name: Mettre à jour les interfaces existantes sur Proxmox
+          when: interface_error
+          community.general.proxmox_nic:
+            api_host: "{{ proxmox_host }}"
+            api_user: "root@pam"
+            api_password: "{{ lookup('env', 'PROXMOX_PASSWORD') }}"
+            vmid: "{{ item.vmid }}"
+            interface: "{{ item.iface }}"
+            bridge: "{{ item.bridge_ports }}"
+            model: "virtio"
+            firewall: "{{ item.firewall | default(false) }}"
+            link_down: "{{ not item.active }}"
+            state: present
+          loop:
+            - { vmid: 100, iface: "vmbr2", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr3", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr4", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr1", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr5", bridge_ports: "", active: 1 }
+            - { vmid: 100, iface: "vmbr7", bridge_ports: "", active: 1 }
+
+        - name: Appliquer les changements réseau sur Proxmox
+          command: ifreload -a
+          become: yes
+          when: interface_error
+
+        - name: Suggérer les prochaines étapes
+          debug:
+            msg: >
+              Les interfaces existantes ont été mises à jour.
+              Vérifiez la configuration réseau sur le serveur Proxmox et relancez le job Jenkins si nécessaire.
+          when: interface_error
+
+    - name: Afficher un message de succès
+      debug:
+        msg: "Le job Jenkins a réussi et aucune action supplémentaire n'est nécessaire."
+      when: job_success
+
+    - name: Analyser le contenu de la console Jenkins
+      when: not job_success
+      block:
+        - name: Rechercher des erreurs spécifiques dans la sortie de console
+          set_fact:
+            specific_errors:
+              - "{{ 'AMQPProtocolChannelException' in jenkins_response.content }}"
+              - "{{ 'NOT_FOUND no queue' in jenkins_response.content }}"
+              - "{{ 'NOT_ALLOWED - vhost' in jenkins_response.content }}"
+
+        - name: Afficher les erreurs spécifiques trouvées
+          debug:
+            msg: "Erreurs spécifiques trouvées dans la sortie de console Jenkins : {{ specific_errors | select('true') | list }}"
+
+        - name: Suggérer des actions correctives
+          debug:
+            msg: >
+              Des erreurs spécifiques ont été détectées dans la sortie de console Jenkins.
+              Veuillez vérifier l'état de RabbitMQ, les configurations de file d'attente et les autorisations de vhost.
+          when: specific_errors | select('true') | list | length > 0
